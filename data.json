@@ -892,6 +892,29 @@
       "media": [],
       "links": [],
       "showBorder": true
+    },
+    {
+      "id": "n1777915025417pwm",
+      "label": "TESTE",
+      "desc": "",
+      "categories": [
+        "raiz"
+      ],
+      "x": 443.29975562713724,
+      "y": 251.0793169451811,
+      "r": 20,
+      "nodeType": "denominacao",
+      "founded": "",
+      "country": "🇧🇷",
+      "members": "",
+      "liberalism": 50,
+      "tags": [],
+      "url": "",
+      "notes": "",
+      "relations": {},
+      "imgZoom": 1,
+      "imgX": 0,
+      "imgY": 0
     }
   ],
   "edges": [
