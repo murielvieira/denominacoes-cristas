@@ -774,29 +774,19 @@ function forkToLocal(){
 // MULTI-WORKSPACE STORAGE (v7)
 // ════════════════════════════════════════════════
 const STORE_KEY = 'denom-v7';
-// _isUsingRemote: true quando a sessão foi inicializada do data.json (visitante novo)
-let _isUsingRemote = false;
+// _hasFork: true somente quando o visitante clicou em "Copiar e editar"
 let WS = loadWS();
 G = loadG();
 function loadWS(){
-  try{
-    const raw=localStorage.getItem(STORE_KEY);
-    if(raw){const w=JSON.parse(raw); if(w && w.tabs && w.tabs.length) return w;}
-  }catch(e){}
-  // Migrar de versões antigas
-  let legacy=null;
-  try{
-    const s=localStorage.getItem('denom-v6')||localStorage.getItem('denom-v5')||localStorage.getItem('denom-v4');
-    if(s) legacy=JSON.parse(s);
-  }catch(e){}
-  const baseData = legacy || JSON.parse(JSON.stringify(SEED));
+  // Ignora qualquer dado salvo no localStorage — sempre parte do SEED
+  // (o localStorage só é usado depois que o visitante fizer fork explícito)
+  const baseData = JSON.parse(JSON.stringify(SEED));
   migrate(baseData);
   const tabId = 'ws'+Date.now().toString(36);
-  _isUsingRemote = !legacy; // se não veio do legacy, vai buscar o remoto
   return { tabs:[{id:tabId, name:'Brasil', mode:'independent', filter:{countries:[],cats:[]}, data:baseData}], activeTabId:tabId };
 }
 function activeTab(){ return WS.tabs.find(t=>t.id===WS.activeTabId) || WS.tabs[0]; }
-function saveWS(){ _isUsingRemote = false; try{ localStorage.setItem(STORE_KEY, JSON.stringify(WS)); }catch(e){ console.warn('Storage cheio:', e); } }
+function saveWS(){ try{ localStorage.setItem(STORE_KEY, JSON.stringify(WS)); }catch(e){ console.warn('Storage cheio:', e); } }
 
 function loadG(){
   // Compat com chamadas antigas: retorna o data da aba ativa.
@@ -2847,23 +2837,20 @@ openGT('node'); setMode('select');
 populateColorByTax(); populateChipTaxSelect();
 buildCatChips(); buildViewChips(); populateFocusSelect(); populateCountryFilter();
 
-// ── Opção B: carrega data.json remoto se visitante novo ──────────────────
-if(_isUsingRemote){
-  fetchRemoteData().then(remoteData => {
-    if(!remoteData || !remoteData.nodes) return; // sem arquivo remoto: usa SEED mesmo
-    // substitui o dataset da aba ativa pelo grafo remoto
-    migrate(remoteData);
-    G = remoteData;
-    activeTab().data = remoteData;
-    // NÃO salva no localStorage — preserva o "estado de visitante"
-    EDGE_TYPES = getEdgeTypes();
-    resizeCV(); fitView(); buildLegend(); updateBadge(); updateZP();
-    populateColorByTax(); populateFocusSelect(); populateCountryFilter();
-    buildViewChips(); buildCatChips(); buildLegend();
-    draw(); renderGT();
-    showPublicBanner();
-  });
-}
+// ── Sempre carrega data.json remoto (visitantes sempre veem a versão publicada) ──
+fetchRemoteData().then(remoteData => {
+  if(!remoteData || !remoteData.nodes) return; // fallback: mantém o SEED de exemplo
+  migrate(remoteData);
+  G = remoteData;
+  activeTab().data = remoteData;
+  // NÃO salva no localStorage — visitante vê sempre a versão publicada
+  EDGE_TYPES = getEdgeTypes();
+  resizeCV(); fitView(); buildLegend(); updateBadge(); updateZP();
+  populateColorByTax(); populateFocusSelect(); populateCountryFilter();
+  buildViewChips(); buildCatChips(); buildLegend();
+  draw(); renderGT();
+  showPublicBanner();
+});
 
 // ════════════════════════════════════════════════
 // MULTI-WORKSPACE TABS
