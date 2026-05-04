@@ -551,9 +551,16 @@ const COUNTRIES = new Proxy({}, {
   getOwnPropertyDescriptor(_, k){ return { enumerable:true, configurable:true, value: COUNTRIES_get()[k] }; }
 });
 
-// ════════════════════════════════════════════════
-// DEFAULT DATA
-// ════════════════════════════════════════════════
+// Converte emoji de bandeira → sigla ISO (🇧🇷 → BR)
+function flagToCode(flag){
+  if(!flag || flag.length < 2) return null;
+  try{
+    const pts = [...flag].map(c => c.codePointAt(0));
+    if(pts.every(p => p >= 0x1F1E6 && p <= 0x1F1FF))
+      return pts.map(p => String.fromCharCode(p - 0x1F1E6 + 65)).join('');
+  }catch(e){}
+  return null;
+}
 const SEED = {
   nodes:[
     {id:'root',label:'Cristianismo',desc:'A fé cristã chegou ao Brasil com os colonizadores em 1500.',categories:['raiz'],x:0,y:0,r:40,founded:'~33',country:'🇮🇱',members:'~2,3 bi mundiais',liberalism:50,tags:['base'],url:'',notes:'',relations:{}},
@@ -640,7 +647,7 @@ const SEED = {
     adventista:{label:'Adventista',color:'#606878',parent:null,taxonomy:'tradicao'},
     outras:{label:'Outras',color:'#608060',parent:null,taxonomy:'tradicao'},
   },
-  settings:{bgColor:'#0e0e10',edgeOpacity:0.22,edgeWidth:1.4,curveEdges:true,showLabels:true},
+  settings:{bgColor:'#0e0e10',edgeOpacity:0.22,edgeWidth:1.4,curveEdges:true,showLabels:true,countryDisplay:'flag'},
   edgeTypes: {},
   // ── Views configuráveis (cada view define quais tipos aparecem e como) ──
   views: {
@@ -722,11 +729,53 @@ const cx=cv.getContext('2d');
 const wrap=document.getElementById('g-area');
 
 // ════════════════════════════════════════════════
+// REMOTE DATA — Opção B: data.json público
+// ════════════════════════════════════════════════
+// O site busca data.json na raiz do mesmo servidor.
+// Visitantes sem localStorage carregam o grafo do autor.
+// Ao editar, os dados passam a ser salvos no localStorage do visitante.
+// Para atualizar o grafo público: exporte JSON, salve como data.json no GitHub.
+const REMOTE_DATA_URL = './data.json';
+let _remoteDataPromise = null;
+function fetchRemoteData(){
+  if(_remoteDataPromise) return _remoteDataPromise;
+  _remoteDataPromise = fetch(REMOTE_DATA_URL, {cache:'no-store'})
+    .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+    .catch(()=>null);
+  return _remoteDataPromise;
+}
+
+// Banner de "você está vendo o grafo público — clique para criar o seu"
+function showPublicBanner(){
+  if(document.getElementById('pub-banner')) return;
+  const b = document.createElement('div');
+  b.id = 'pub-banner';
+  b.style.cssText = 'position:fixed;bottom:18px;right:18px;z-index:999;background:var(--bg2);border:1px solid var(--ac2);border-radius:var(--r);padding:11px 16px;max-width:280px;font-size:12px;line-height:1.5;color:var(--tx2);box-shadow:0 6px 20px rgba(0,0,0,.5)';
+  b.innerHTML = `<div style="font-family:var(--serif);font-size:14px;color:var(--ac);margin-bottom:5px">📖 Modo leitura</div>
+    Você está vendo o grafo público. Edições ficam salvas apenas no <b>seu navegador</b>.
+    <div style="margin-top:8px;display:flex;gap:6px">
+      <button onclick="forkToLocal()" style="flex:1;background:var(--ac2);border:none;border-radius:var(--rs);color:#1a1208;font-size:11px;padding:5px 8px;cursor:pointer;font-weight:500">✂ Copiar e editar</button>
+      <button onclick="document.getElementById('pub-banner').remove()" style="background:transparent;border:1px solid var(--br2);border-radius:var(--rs);color:var(--tx3);font-size:11px;padding:5px 8px;cursor:pointer">×</button>
+    </div>`;
+  document.body.appendChild(b);
+}
+
+// "Fork": copia o grafo público para o localStorage do visitante
+function forkToLocal(){
+  if(!confirm('Criar uma cópia do grafo público para você editar?\n\nSuas edições ficam salvas neste navegador. Você não afeta o grafo original.')) return;
+  // já está carregado em G — só marca como "editável" salvando no localStorage
+  saveWS();
+  const b = document.getElementById('pub-banner');
+  if(b) b.remove();
+  toast('✓ Cópia criada! Agora você pode editar livremente.');
+}
+
+// ════════════════════════════════════════════════
 // MULTI-WORKSPACE STORAGE (v7)
 // ════════════════════════════════════════════════
-// Estrutura no localStorage: { tabs: [{id, name, mode:'independent'|'view', filter:{countries:[],cats:[]}, data:G}], activeTabId }
-// Compat: se houver dados antigos (denom-v6/v5/v4), monta um workspace único com eles.
 const STORE_KEY = 'denom-v7';
+// _isUsingRemote: true quando a sessão foi inicializada do data.json (visitante novo)
+let _isUsingRemote = false;
 let WS = loadWS();
 G = loadG();
 function loadWS(){
@@ -743,10 +792,11 @@ function loadWS(){
   const baseData = legacy || JSON.parse(JSON.stringify(SEED));
   migrate(baseData);
   const tabId = 'ws'+Date.now().toString(36);
+  _isUsingRemote = !legacy; // se não veio do legacy, vai buscar o remoto
   return { tabs:[{id:tabId, name:'Brasil', mode:'independent', filter:{countries:[],cats:[]}, data:baseData}], activeTabId:tabId };
 }
 function activeTab(){ return WS.tabs.find(t=>t.id===WS.activeTabId) || WS.tabs[0]; }
-function saveWS(){ try{ localStorage.setItem(STORE_KEY, JSON.stringify(WS)); }catch(e){ console.warn('Storage cheio:', e); } }
+function saveWS(){ _isUsingRemote = false; try{ localStorage.setItem(STORE_KEY, JSON.stringify(WS)); }catch(e){ console.warn('Storage cheio:', e); } }
 
 function loadG(){
   // Compat com chamadas antigas: retorna o data da aba ativa.
@@ -1436,12 +1486,30 @@ function drawNode(n){
     }
   }
 
-  // ── Country flag ───────────────────────────────────────────────────────
-  if(vis && n.country && n.country!=='🇧🇷'){
-    cx.font=`${Math.max(8,r*0.5)}px serif`;
-    cx.textAlign='center'; cx.textBaseline='middle';
-    cx.globalAlpha=vis?0.9:0.05;
-    cx.fillText(n.country,n.x+r*0.7,n.y-r*0.7);
+  // ── Country badge — à esquerda do nó, harmonizado ─────────────────────
+  if(vis && n.country){
+    const _CN = COUNTRIES_get();
+    const display = G.settings?.countryDisplay || 'flag'; // 'flag' | 'code' | 'none'
+    if(display !== 'none'){
+      const flagOrCode = display === 'code'
+        ? (flagToCode(n.country) || n.country)
+        : n.country;
+      const fs = Math.max(8, r * 0.48);
+      cx.save();
+      cx.globalAlpha = nodeAlpha * 0.82;
+      cx.font = display === 'code'
+        ? `500 ${Math.max(7,r*0.38)}px 'DM Sans',sans-serif`
+        : `${fs}px serif`;
+      cx.textAlign = 'right';
+      cx.textBaseline = 'middle';
+      // sombra suave para legibilidade
+      cx.shadowColor = 'rgba(0,0,0,0.9)';
+      cx.shadowBlur = 3/scale;
+      cx.fillStyle = '#e8e6df';
+      cx.fillText(flagOrCode, n.x - r - 4/scale, n.y);
+      cx.restore();
+      cx.globalAlpha = nodeAlpha;
+    }
   }
 
   // ── Label ──────────────────────────────────────────────────────────────
@@ -2022,6 +2090,11 @@ function renderStyleTab(){
       <option value="true" ${s.showLabels!==false?'selected':''}>Visíveis</option>
       <option value="false" ${s.showLabels===false?'selected':''}>Ocultos</option>
     </select></div>
+    <div class="field"><label>País nos nós</label><select onchange="us('countryDisplay',this.value);draw()">
+      <option value="flag" ${(s.countryDisplay||'flag')==='flag'?'selected':''}>🏳 Bandeira (emoji)</option>
+      <option value="code" ${s.countryDisplay==='code'?'selected':''}>BR Sigla (ISO)</option>
+      <option value="none" ${s.countryDisplay==='none'?'selected':''}>Ocultar</option>
+    </select></div>
     <div class="div"></div>
     <div class="stitle">Tipos de aresta</div>
     ${Object.entries(getEdgeTypes()).map(([k,v])=>`
@@ -2296,6 +2369,16 @@ function renderDataTab(){
       'Históricos|'+G.nodes.filter(n=>n.tags&&n.tags.includes('histórico')).length,
     ].map(s=>{const[l,v]=s.split('|');return`<div class="sc"><div class="sc-v">${v}</div><div class="sc-l">${l}</div></div>`;}).join('')}
     </div>
+    <div class="stitle">Publicar grafo público</div>
+    <div style="font-size:11px;color:var(--tx3);margin-bottom:8px;line-height:1.6">
+      Para atualizar o grafo que visitantes veem ao abrir o site, exporte o <code style="background:var(--bg3);padding:1px 4px;border-radius:3px">data.json</code> e suba no GitHub no mesmo repositório que o <code style="background:var(--bg3);padding:1px 4px;border-radius:3px">index.html</code>.
+      Visitantes novos sempre carregam a versão mais recente. Quem já fez uma cópia local não é afetado.
+    </div>
+    <button class="btn btn-p" onclick="exportDataJson()" style="margin-bottom:6px">⬇ Exportar data.json</button>
+    <div style="font-size:10px;color:var(--tx3);line-height:1.6;margin-bottom:4px">
+      No GitHub: <b>Add file → Upload files</b> → selecione o <code style="background:var(--bg3);padding:1px 3px;border-radius:3px">data.json</code> → Commit changes.
+    </div>
+    <div class="div"></div>
     <div class="stitle">Exportar / Importar</div>
     <button class="btn btn-p" onclick="exportJSON()" style="margin-bottom:5px">⬇ Exportar JSON</button>
     <button class="btn btn-s" onclick="document.getElementById('impf').click()" style="margin-bottom:5px">⬆ Importar JSON</button>
@@ -2325,19 +2408,41 @@ function renderDataTab(){
       <button class="btn btn-p" onclick="addCustomNodeType()">+ Criar tipo</button>
     </div>
     <div class="div"></div>
-    <div class="stitle">Países desta workspace</div>
-    <div style="font-size:11px;color:var(--tx3);margin-bottom:8px">A lista base já cobre ~120 países. Adicione os que faltarem (emoji da bandeira + nome).</div>
-    <div style="display:grid;grid-template-columns:60px 1fr 32px;gap:5px;margin-bottom:8px">
-      <input type="text" id="cc-flag" placeholder="🇧🇷" style="background:var(--bg3);border:1px solid var(--br);color:var(--tx);font-size:14px;padding:4px;border-radius:var(--rs);outline:none;text-align:center">
-      <input type="text" id="cc-name" placeholder="Nome do país" style="background:var(--bg3);border:1px solid var(--br);color:var(--tx);font-size:11px;padding:4px 6px;border-radius:var(--rs);outline:none">
-      <button class="btn btn-p" onclick="addCountry()" style="padding:4px;font-size:13px">+</button>
+    <div class="stitle">Países</div>
+    <div style="font-size:11px;color:var(--tx3);margin-bottom:8px">Gerencie os países disponíveis para os nós. A lista base cobre ~120 países; edite ou adicione os que faltarem.</div>
+
+    <!-- Busca + adicionar novo -->
+    <div style="display:grid;grid-template-columns:1fr;gap:5px;margin-bottom:8px">
+      <input type="text" id="cc-search" placeholder="🔍 Buscar país…" oninput="renderCountryList()"
+        style="background:var(--bg3);border:1px solid var(--br);color:var(--tx);font-size:12px;padding:5px 8px;border-radius:var(--rs);outline:none">
     </div>
-    ${Object.keys(G.countriesCustom||{}).length ? `<div style="max-height:160px;overflow-y:auto;border:1px solid var(--br);border-radius:var(--rs);padding:5px;background:var(--bg3)">
-      ${Object.entries(G.countriesCustom).map(([flag,name])=>`<div style="display:flex;align-items:center;gap:6px;padding:3px 4px;font-size:12px"><span style="font-size:14px">${flag}</span><span style="flex:1">${h(name)}</span><span style="cursor:pointer;color:var(--tx3)" onclick="removeCountry('${flag}')">×</span></div>`).join('')}
-    </div>` : '<div style="font-size:11px;color:var(--tx3);margin-bottom:8px">— sem países customizados —</div>'}
+    <div style="background:var(--bg3);border:1px solid var(--br);border-radius:var(--rs);padding:8px;margin-bottom:8px">
+      <div style="font-size:10px;color:var(--tx3);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em">Adicionar país</div>
+      <div style="display:grid;grid-template-columns:1fr auto;gap:5px;margin-bottom:5px;align-items:center">
+        <input type="text" id="cc-name" placeholder="Nome do país"
+          style="background:var(--bg4);border:1px solid var(--br);color:var(--tx);font-size:12px;padding:5px 7px;border-radius:var(--rs);outline:none">
+        <button class="btn btn-p" onclick="addCountry()" style="padding:5px 10px">+</button>
+      </div>
+      <div style="font-size:10px;color:var(--tx3);margin-bottom:5px">Bandeira — escolha da lista ou cole o emoji diretamente:</div>
+      <div style="display:grid;grid-template-columns:1fr 56px;gap:5px;align-items:center">
+        <select id="cc-flag-select" style="background:var(--bg4);border:1px solid var(--br);color:var(--tx);font-size:12px;padding:5px 7px;border-radius:var(--rs);outline:none"
+          onchange="syncFlagInput(this.value)">
+          <option value="">— selecione da lista base —</option>
+          ${Object.entries(COUNTRIES_BASE).map(([f,n])=>`<option value="${f}">${f} ${n}</option>`).join('')}
+        </select>
+        <div id="cc-flag-preview" style="font-size:22px;text-align:center;line-height:36px;background:var(--bg4);border:1px solid var(--br);border-radius:var(--rs);min-height:34px">🏳</div>
+      </div>
+      <div style="margin-top:5px;font-size:10px;color:var(--tx3)">Ou cole um emoji de bandeira aqui (ex: 🇫🇷):</div>
+      <input type="text" id="cc-flag-raw" placeholder="Cole o emoji aqui…"
+        style="width:100%;margin-top:3px;background:var(--bg4);border:1px solid var(--br);color:var(--tx);font-size:18px;padding:4px 7px;border-radius:var(--rs);outline:none;font-family:serif"
+        oninput="syncFlagPreview(this.value)">
+      <input type="hidden" id="cc-flag">
+    </div>
+    <div id="country-list-wrap" style="max-height:260px;overflow-y:auto;border:1px solid var(--br);border-radius:var(--rs);background:var(--bg3)"></div>
     <div class="div"></div>
     <button class="btn btn-d" onclick="resetAll()">⚠ Restaurar dados de exemplo</button>`;
   renderNodeTypeList();
+  renderCountryList();
 }
 
 const SHAPE_OPTIONS = [
@@ -2703,6 +2808,13 @@ function exportJSON(){
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);
   a.download='denominacoes-'+new Date().toISOString().slice(0,10)+'.json';a.click();toast('JSON exportado!');
 }
+function exportDataJson(){
+  // Exporta o grafo atual como data.json pronto para subir no GitHub
+  const blob=new Blob([JSON.stringify(G,null,2)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  a.download='data.json';a.click();
+  toast('data.json exportado! Suba no GitHub para publicar.');
+}
 function importJSON(e){
   const f=e.target.files[0];if(!f)return;
   const r=new FileReader();
@@ -2734,6 +2846,24 @@ resizeCV(); fitView(); buildLegend(); updateBadge(); updateZP();
 openGT('node'); setMode('select');
 populateColorByTax(); populateChipTaxSelect();
 buildCatChips(); buildViewChips(); populateFocusSelect(); populateCountryFilter();
+
+// ── Opção B: carrega data.json remoto se visitante novo ──────────────────
+if(_isUsingRemote){
+  fetchRemoteData().then(remoteData => {
+    if(!remoteData || !remoteData.nodes) return; // sem arquivo remoto: usa SEED mesmo
+    // substitui o dataset da aba ativa pelo grafo remoto
+    migrate(remoteData);
+    G = remoteData;
+    activeTab().data = remoteData;
+    // NÃO salva no localStorage — preserva o "estado de visitante"
+    EDGE_TYPES = getEdgeTypes();
+    resizeCV(); fitView(); buildLegend(); updateBadge(); updateZP();
+    populateColorByTax(); populateFocusSelect(); populateCountryFilter();
+    buildViewChips(); buildCatChips(); buildLegend();
+    draw(); renderGT();
+    showPublicBanner();
+  });
+}
 
 // ════════════════════════════════════════════════
 // MULTI-WORKSPACE TABS
@@ -2933,17 +3063,111 @@ function removeEdgeLink(eid, lid){
 // ════════════════════════════════════════════════
 // COUNTRIES MANAGER
 // ════════════════════════════════════════════════
+function renderCountryList(){
+  const el = document.getElementById('country-list-wrap'); if(!el) return;
+  const q = (document.getElementById('cc-search')?.value||'').toLowerCase().trim();
+  const base = COUNTRIES_BASE;
+  const custom = G.countriesCustom || {};
+  // Merge: custom overrides base
+  const all = Object.assign({}, base, custom);
+  const entries = Object.entries(all)
+    .filter(([flag,name]) => !q || flag.toLowerCase().includes(q) || name.toLowerCase().includes(q))
+    .sort((a,b) => a[1].localeCompare(b[1]));
+
+  if(!entries.length){
+    el.innerHTML = '<div style="font-size:11px;color:var(--tx3);padding:10px;text-align:center">— nenhum país encontrado —</div>';
+    return;
+  }
+
+  el.innerHTML = entries.map(([flag, name]) => {
+    const isCustom = flag in custom;
+    const isBase = flag in base;
+    const isOverride = isCustom && isBase; // custom sobrescreve base
+    const editId = 'cc-edit-'+flag.replace(/[^a-zA-Z]/g,'_');
+    const code = flagToCode(flag) || '';
+    return `
+    <div style="border-bottom:1px solid var(--br)">
+      <div style="display:flex;align-items:center;gap:7px;padding:5px 8px">
+        <span style="font-size:16px;min-width:22px;text-align:center">${flag}</span>
+        <span style="flex:1;font-size:12px">${h(name)}</span>
+        ${code?`<span style="font-size:10px;color:var(--tx3);font-family:monospace">${code}</span>`:''}
+        ${isOverride?`<span style="font-size:9px;color:var(--ac);background:rgba(201,169,110,.1);border-radius:3px;padding:1px 4px">editado</span>`:''}
+        ${isCustom&&!isBase?`<span style="font-size:9px;color:var(--tx3);background:var(--bg4);border-radius:3px;padding:1px 4px">custom</span>`:''}
+        <button onclick="toggleCCEdit('${editId}')"
+          style="background:transparent;border:none;color:var(--tx3);cursor:pointer;font-size:12px;padding:2px 5px">✎</button>
+        ${isCustom?`<button onclick="removeCountry('${flag}')"
+          style="background:transparent;border:none;color:var(--red);cursor:pointer;font-size:14px;padding:2px 4px;opacity:.7">×</button>`:''}
+      </div>
+      <div id="${editId}" style="display:none;padding:6px 8px 8px;background:var(--bg4);border-top:1px solid var(--br)">
+        <div style="display:grid;grid-template-columns:56px 1fr auto;gap:5px;align-items:center">
+          <div style="font-size:22px;text-align:center;line-height:34px;background:var(--bg3);border:1px solid var(--br);border-radius:var(--rs)">${flag}</div>
+          <input type="text" value="${h(name)}"
+            style="background:var(--bg3);border:1px solid var(--br);color:var(--tx);font-size:12px;padding:4px 6px;border-radius:var(--rs);outline:none"
+            oninput="this.dataset.newName=this.value">
+          <button onclick="saveCountryEdit('${flag}','${editId}',this.parentElement)"
+            class="btn btn-p" style="padding:4px 8px;font-size:11px">✓</button>
+        </div>
+        ${isBase&&!isCustom?`<div style="font-size:10px;color:var(--tx3);margin-top:4px">País da lista base — ao editar o nome, sua versão sobrescreve apenas nesta workspace.</div>`:''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggleCCEdit(id){
+  const el = document.getElementById(id); if(!el) return;
+  el.style.display = el.style.display==='none' ? 'block' : 'none';
+}
+
+function saveCountryEdit(originalFlag, editId, row){
+  const nameInput = row.querySelector('input[type="text"]');
+  const newName = (nameInput?.value||'').trim();
+  if(!newName){ toast('Nome não pode ficar vazio'); return; }
+  if(!G.countriesCustom) G.countriesCustom={};
+  G.countriesCustom[originalFlag] = newName;
+  saveG(); renderDataTab(); populateCountryFilter();
+  toast('País atualizado');
+}
+
+function syncFlagInput(val){
+  const preview = document.getElementById('cc-flag-preview');
+  const hidden  = document.getElementById('cc-flag');
+  const raw     = document.getElementById('cc-flag-raw');
+  if(preview) preview.textContent = val || '🏳';
+  if(hidden)  hidden.value = val;
+  if(raw)     raw.value = val;
+  const nameEl = document.getElementById('cc-name');
+  if(nameEl && !nameEl.value && val && COUNTRIES_BASE[val])
+    nameEl.value = COUNTRIES_BASE[val];
+}
+function syncFlagPreview(val){
+  const preview = document.getElementById('cc-flag-preview');
+  const hidden  = document.getElementById('cc-flag');
+  const trimmed = val.trim();
+  if(preview) preview.textContent = trimmed || '🏳';
+  if(hidden)  hidden.value = trimmed;
+}
 function addCountry(){
-  const flag = (document.getElementById('cc-flag').value||'').trim();
-  const name = (document.getElementById('cc-name').value||'').trim();
-  if(!flag || !name){ toast('Preencha emoji e nome'); return; }
+  const flag = (document.getElementById('cc-flag')?.value||'').trim();
+  const name = (document.getElementById('cc-name')?.value||'').trim();
+  if(!flag){ toast('Selecione ou cole uma bandeira'); return; }
+  if(!name){ toast('Preencha o nome do país'); return; }
   if(!G.countriesCustom) G.countriesCustom={};
   G.countriesCustom[flag] = name;
+  const sel = document.getElementById('cc-flag-select'); if(sel) sel.value='';
+  const raw = document.getElementById('cc-flag-raw');   if(raw) raw.value='';
+  const hid = document.getElementById('cc-flag');       if(hid) hid.value='';
+  const pre = document.getElementById('cc-flag-preview'); if(pre) pre.textContent='🏳';
+  const nm  = document.getElementById('cc-name');       if(nm)  nm.value='';
   saveG(); renderDataTab(); populateCountryFilter(); toast('País adicionado');
 }
+
 function removeCountry(flag){
   if(!G.countriesCustom || !G.countriesCustom[flag]) return;
-  if(!confirm('Remover "'+G.countriesCustom[flag]+'"? Nós que usam essa bandeira ficarão com ela mesmo assim.')) return;
+  const inBase = flag in COUNTRIES_BASE;
+  const msg = inBase
+    ? `Remover edição de "${G.countriesCustom[flag]}"? O nome original da lista base será restaurado.`
+    : `Remover "${G.countriesCustom[flag]}"? Nós que usam essa bandeira ficarão com ela mesmo assim.`;
+  if(!confirm(msg)) return;
   delete G.countriesCustom[flag];
   saveG(); renderDataTab(); populateCountryFilter();
 }
