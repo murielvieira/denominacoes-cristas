@@ -100,8 +100,8 @@
         "batista692",
         "batista"
       ],
-      "x": -5.319126281904548,
-      "y": 798.8204691830036,
+      "x": -42.631500011521936,
+      "y": 912.5343700732661,
       "r": 30,
       "founded": "",
       "country": "🇧🇷",
@@ -188,8 +188,8 @@
       "categories": [
         "raiz"
       ],
-      "x": -1061.3051852869185,
-      "y": -922.378084867855,
+      "x": -826.6920579051695,
+      "y": -915.7692643782284,
       "r": 65,
       "founded": "",
       "country": "🇧🇷",
@@ -231,8 +231,8 @@
       "categories": [
         "catolicismo"
       ],
-      "x": -574.1374719593084,
-      "y": -542.7335847971015,
+      "x": -640.2256768555758,
+      "y": -625.3438409174356,
       "r": 50,
       "founded": "",
       "country": "🇧🇷",
@@ -1328,21 +1328,24 @@
       "epistemic": "emic"
     },
     {
-      "id": "n1777915025417pwm",
-      "label": "TESTE",
+      "id": "n1779311080810uwm",
+      "label": "Teste  1",
       "desc": "",
       "categories": [
         "raiz"
       ],
-      "x": 443.29975562713724,
-      "y": 251.0793169451811,
+      "x": 107.08933808246134,
+      "y": -128.85346069556763,
       "r": 20,
       "nodeType": "denominacao",
       "founded": "",
       "country": "🇧🇷",
-      "members": "",
-      "liberalism": 50,
+      "status": "active",
       "tags": [],
+      "epistemic": "emic",
+      "schemaData": {},
+      "theologicalAxes": {},
+      "factions": [],
       "url": "",
       "notes": "",
       "relations": {},
@@ -1352,20 +1355,114 @@
       "links": [],
       "media": [],
       "props": {},
-      "editHistory": [],
-      "schemaData": {},
-      "theologicalAxes": {
-        "ax2": {
-          "value": 50,
-          "source": {
-            "text": "Migrado do campo \"liberalism\"",
-            "url": ""
-          },
-          "date": ""
+      "editHistory": [
+        {
+          "field": "label",
+          "oldVal": "Teste  ",
+          "ts": "2026-05-20T21:04:45.573Z"
+        },
+        {
+          "field": "label",
+          "oldVal": "Teste ",
+          "ts": "2026-05-20T21:04:44.954Z"
+        },
+        {
+          "field": "label",
+          "oldVal": "Teste",
+          "ts": "2026-05-20T21:04:44.867Z"
+        },
+        {
+          "field": "label",
+          "oldVal": "Test",
+          "ts": "2026-05-20T21:04:44.373Z"
+        },
+        {
+          "field": "label",
+          "oldVal": "Tes",
+          "ts": "2026-05-20T21:04:44.279Z"
+        },
+        {
+          "field": "label",
+          "oldVal": "Te",
+          "ts": "2026-05-20T21:04:43.981Z"
+        },
+        {
+          "field": "label",
+          "oldVal": "T",
+          "ts": "2026-05-20T21:04:43.737Z"
+        },
+        {
+          "field": "label",
+          "oldVal": "Novo nó",
+          "ts": "2026-05-20T21:04:43.488Z"
         }
-      },
+      ]
+    },
+    {
+      "id": "n1779311088026w0j",
+      "label": "teste 2",
+      "desc": "",
+      "categories": [
+        "raiz"
+      ],
+      "x": 229.7682059565447,
+      "y": -149.54628178276243,
+      "r": 20,
+      "nodeType": "denominacao",
+      "founded": "",
+      "country": "🇧🇷",
+      "status": "active",
+      "tags": [],
+      "epistemic": "emic",
+      "schemaData": {},
+      "theologicalAxes": {},
       "factions": [],
-      "epistemic": "emic"
+      "url": "",
+      "notes": "",
+      "relations": {},
+      "imgZoom": 1,
+      "imgX": 0,
+      "imgY": 0,
+      "links": [],
+      "media": [],
+      "props": {},
+      "editHistory": [
+        {
+          "field": "label",
+          "oldVal": "teste ",
+          "ts": "2026-05-20T21:04:52.114Z"
+        },
+        {
+          "field": "label",
+          "oldVal": "teste",
+          "ts": "2026-05-20T21:04:51.572Z"
+        },
+        {
+          "field": "label",
+          "oldVal": "test",
+          "ts": "2026-05-20T21:04:51.324Z"
+        },
+        {
+          "field": "label",
+          "oldVal": "tes",
+          "ts": "2026-05-20T21:04:51.237Z"
+        },
+        {
+          "field": "label",
+          "oldVal": "te",
+          "ts": "2026-05-20T21:04:51.041Z"
+        },
+        {
+          "field": "label",
+          "oldVal": "t",
+          "ts": "2026-05-20T21:04:50.865Z"
+        },
+        {
+          "field": "label",
+          "oldVal": "Novo nó",
+          "ts": "2026-05-20T21:04:50.800Z"
+        }
+      ]
     }
   ],
   "edges": [
@@ -2611,8 +2708,8 @@
   ],
   "metadata": {
     "version": 15,
-    "created": "2026-05-08T15:00:52.188Z",
+    "created": "2026-05-20T15:38:27.822Z",
     "description": "",
-    "exportedAt": "2026-05-08T15:01:11.822Z"
+    "exportedAt": "2026-05-20T21:04:55.049Z"
   }
 }
