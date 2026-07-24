@@ -834,20 +834,12 @@ const _remoteURL = (()=>{
   }catch(e){}
   return null;
 })();
-// Chave de localStorage específica para este site (evita colisão entre projetos).
-// Visitantes não têm a chave _localKey; autores que já salvaram localmente têm.
-const _localKey = _remoteURL
-  ? 'denom-local::'+btoa(_remoteURL).slice(0,24)
-  : 'denom-ws';
-// É modo remoto se: estamos num host público E não há cópia local salva por este usuário.
-const _isUsingRemote = !!_remoteURL && !localStorage.getItem(_localKey);
+const _isUsingRemote = _remoteURL && !localStorage.getItem('denom-ws');
 
 // Workspace multi-abas
 let WS = (() => {
   try{
-    // Em modo remoto nunca lê o localStorage (visitante vê sempre o grafo do autor)
-    if(_isUsingRemote) return null;
-    const s=localStorage.getItem(_localKey);
+    const s=localStorage.getItem('denom-ws');
     if(s) return JSON.parse(s);
   }catch(e){}
   return {
@@ -859,7 +851,7 @@ let WS = (() => {
 function activeTab(){ return WS.tabs.find(t=>t.id===WS.activeTabId)||WS.tabs[0]; }
 let G = activeTab().data;
 
-function saveWS(){ if(_isUsingRemote)return; try{localStorage.setItem(_localKey,JSON.stringify(WS));}catch(e){toast('⚠ Armazenamento cheio — exporte o JSON!');} }
+function saveWS(){ try{localStorage.setItem('denom-ws',JSON.stringify(WS));}catch(e){toast('⚠ Armazenamento cheio — exporte o JSON!');} }
 function saveG(){ activeTab().data=G; saveWS(); updateBadge(); }
 
 // ── Histórico de undo/redo ────────────────────────────────────
@@ -1040,22 +1032,18 @@ function isVis(n){
   const yr=parseYear(n.founded||n.schemaData?.founded||n.schemaData?.birthDate||n.schemaData?.eventDate);
   if(filtYearFrom&&yr&&yr<filtYearFrom)return false;
   if(filtYearTo&&yr&&yr>filtYearTo)return false;
-  // Viagem no tempo: não bloqueia aqui — o fade é tratado por nodeTimeAlpha()
+  // Viagem no tempo: oculta nós fundados após a época
   return true;
 }
 
-// Retorna alpha 0..1 baseado na distância temporal do nó ao ano corrente.
-// alpha=1  → nó existe nesta época
-// alpha=0  → nó ainda não existe (fundado depois)
-// fade gradual de 20 anos antes da fundação (aparece surgindo)
 function nodeTimeAlpha(n){
   if(!timeWarpActive) return 1;
   const yr=parseYear(n.founded||n.schemaData?.founded||n.schemaData?.birthDate||n.schemaData?.eventDate);
-  if(!yr) return 1; // sem data: sempre visível
-  if(yr<=timeWarpYear) return 1; // já existe: opaco
-  const dist=yr-timeWarpYear; // quantos anos no futuro
-  if(dist>=25) return 0;       // 25+ anos no futuro: invisível
-  return Math.max(0, 1-(dist/25)); // fade suave nos últimos 25 anos antes
+  if(!yr) return 1;
+  if(yr<=timeWarpYear) return 1;
+  const dist=yr-timeWarpYear;
+  if(dist>=25) return 0.06;
+  return Math.max(0, 1-(dist/25));
 }
 
 function parseYear(s){
@@ -1065,16 +1053,23 @@ function parseYear(s){
 }
 
 // Visibilidade de aresta com filtro de época
-function isEdgeVisible(e){
-  if(timeWarpActive){
-    const startY=parseYear(e.start);
-    const endY=parseYear(e.end);
-    if(startY&&startY>timeWarpYear)return false;
-    if(endY&&endY<timeWarpYear)return false;
-  }
-  return true;
-}
+function isEdgeVisible(e){ return true; }
 
+// Retorna alpha 0..1 para a aresta conforme a época do slider
+function edgeTimeAlpha(e){
+  if(!timeWarpActive) return 1;
+  const startY=parseYear(e.start);
+  const endY=parseYear(e.end);
+  // Aresta ainda não começou: fade (não some)
+  if(startY&&startY>timeWarpYear){
+    const dist=startY-timeWarpYear;
+    if(dist>=25) return 0.06;
+    return Math.max(0.06, 1-(dist/25));
+  }
+  // Aresta já terminou: fica sombreada
+  if(endY&&endY<timeWarpYear) return 0.06;
+  return 1;
+}
 // ── Focus/vizinhança ──────────────────────────────────────────
 function getNeighbors(id,hops){
   const visited=new Set([id]);
@@ -1152,7 +1147,8 @@ function drawEdges(){
     const hi=(selId===e.from||selId===e.to);
     const dimmed=hasFilter||focusNodeId;
     const base=parseFloat(G.settings.edgeOpacity)||0.32;
-    let op=hi?0.95:(dimmed?0.09:base);
+    const eta=edgeTimeAlpha(e);
+           let op=(hi?0.95:(dimmed?0.09:base))*eta;
     // Arestas contestadas ficam levemente destacadas em vermelho
     if(e.contested&&!dimmed)op=Math.max(op,0.45);
 
@@ -1200,32 +1196,31 @@ function drawEdges(){
       cx.closePath(); cx.fill();
     }
 
-    // Rótulo da aresta — coordenadas mundo, tamanho /scale para seguir zoom
-    if(e.label&&(hi||!dimmed)){
-      const lx=(a.x+b.x)/2, ly=(a.y+b.y)/2-10/scale;
-      cx.save();
-      cx.globalAlpha=Math.min(op*1.6,1);
-      cx.font=`500 ${Math.max(7,10)/scale}px 'DM Sans',sans-serif`;
-      cx.textAlign='center'; cx.textBaseline='middle';
-      cx.shadowColor='rgba(0,0,0,0.85)'; cx.shadowBlur=3/scale;
-      cx.fillStyle='#d8d0c0';
-      cx.fillText(e.label,lx,ly);
-      cx.restore();
-    }
+// Rótulo da aresta — font SEM /scale pois o canvas já está escalado
+if(e.label&&(hi||!dimmed)){
+  const lx=(a.x+b.x)/2, ly=(a.y+b.y)/2-8;
+  cx.save();
+  cx.globalAlpha=Math.min(op*1.5,1);
+  cx.font=`500 10px 'DM Sans',sans-serif`;
+  cx.textAlign='center'; cx.textBaseline='middle';
+  cx.shadowColor='rgba(0,0,0,0.9)'; cx.shadowBlur=3;
+  cx.fillStyle='#d8d0c0';
+  cx.fillText(e.label,lx,ly);
+  cx.restore();
+}
 
-    // Badge de contestado
-    if(e.contested&&(hi||!dimmed)){
-      const lx=(a.x+b.x)/2+14/scale, ly=(a.y+b.y)/2-2/scale;
-      cx.save();
-      cx.globalAlpha=0.92;
-      cx.font=`bold ${12/scale}px sans-serif`;
-      cx.textAlign='center'; cx.textBaseline='middle';
-      cx.shadowColor='rgba(0,0,0,0.9)'; cx.shadowBlur=3/scale;
-      cx.fillStyle='#e06060';
-      cx.fillText('⚡',lx,ly);
-      cx.restore();
-    }
-
+// Badge de contestado
+if(e.contested&&(hi||!dimmed)){
+  const lx=(a.x+b.x)/2+12, ly=(a.y+b.y)/2;
+  cx.save();
+  cx.globalAlpha=0.9;
+  cx.font=`bold 11px sans-serif`;
+  cx.textAlign='center'; cx.textBaseline='middle';
+  cx.shadowColor='rgba(0,0,0,0.9)'; cx.shadowBlur=3;
+  cx.fillStyle='#e06060';
+  cx.fillText('⚡',lx,ly);
+  cx.restore();
+}
     cx.globalAlpha=1;
   });
 }
@@ -1281,10 +1276,10 @@ function drawNode(n){
     (document.getElementById('country-filter')?.value)||filtYearFrom||filtYearTo;
   const timeA=nodeTimeAlpha(n);
   let nodeAlpha=(vis?1:(hasFilter?0.06:1))*timeA;
-  const nf=nodeFocusFactor(n);
-  if(focusNodeId)nodeAlpha=Math.min(nodeAlpha,nf);
-  if(nodeAlpha<=0.01){cx.globalAlpha=1;return;} // invisível: não desenha
+    const nf=nodeFocusFactor(n);
+     if(focusNodeId)nodeAlpha=Math.min(nodeAlpha,nf);
   cx.globalAlpha=nodeAlpha;
+
 
   const NT=getNodeTypes();
   const nt=NT[n.nodeType||'denominacao']||NT.denominacao||{shape:'circle'};
@@ -3357,17 +3352,10 @@ function showPublicBanner(){
 function copyToEdit(){
   const copy=JSON.parse(JSON.stringify(G));
   const id='ws'+Date.now().toString(36);
-  // Cria workspace local independente e marca que este usuário agora tem cópia local
-  if(!WS||!WS.tabs){
-    WS={activeTabId:id,tabs:[{id,name:'Cópia do grafo público',mode:'independent',filter:{},data:copy}]};
-  } else {
-    WS.tabs.push({id,name:'Cópia do grafo público',mode:'independent',filter:{},data:copy});
-  }
-  // A partir de agora este navegador tem cópia própria — sai do modo remoto
-  try{ localStorage.setItem(_localKey,JSON.stringify(WS)); }catch(e){}
-  // Recarrega para sair do modo remoto corretamente
-  toast('Cópia criada! Recarregando em modo de edição…');
-  setTimeout(()=>location.reload(), 1200);
+  WS.tabs.push({id,name:'Cópia do grafo público',mode:'independent',filter:{},data:copy});
+  switchTab(id);
+  toast('Cópia criada — agora você pode editar!');
+  document.querySelector('[style*="Modo leitura"]')?.remove();
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -3394,7 +3382,10 @@ buildFiltNodeTypes();
 // Carrega grafo remoto se for visitante
 if(_isUsingRemote){
   fetchRemoteData().then(remoteData=>{
-    if(!remoteData||!remoteData.nodes)return;
+    if(!remoteData||!Array.isArray(remoteData.nodes)){
+      toast('⚠ Não foi possível carregar data.json — exibindo dados de exemplo. Verifique se o arquivo está publicado ao lado do index.html.');
+      return;
+    }
     migrate(remoteData);
     G=remoteData;
     activeTab().data=remoteData;
