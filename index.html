@@ -1837,9 +1837,29 @@ function removeNodeCat(nid,catId){
 // Imagem
 function processImg(e,nid){
   const file=e.target.files[0];if(!file)return;
+  if(!file.type.startsWith('image/')){toast('Selecione um arquivo de imagem');e.target.value='';return;}
   const reader=new FileReader();
-  reader.onload=(ev)=>{const n=nb(nid);n.imgData=ev.target.result;saveG();draw();};
+  reader.onload=(ev)=>{
+    const n=nb(nid);if(!n)return;
+    n.imgData=ev.target.result;
+    if(n.imgZoom===undefined)n.imgZoom=1;
+    if(n.imgX===undefined)n.imgX=0;
+    if(n.imgY===undefined)n.imgY=0;
+    delete imgCache[nid];
+    saveG();draw();if(panelOpen)renderNodeTab();
+    toast('Imagem atualizada');
+  };
   reader.readAsDataURL(file);
+  e.target.value='';
+}
+function removeNodeImg(nid){
+  const n=nb(nid);if(!n)return;
+  delete n.imgData;delete imgCache[nid];
+  saveG();draw();if(panelOpen)renderNodeTab();
+}
+function setNodeImgProp(nid,field,value){
+  const n=nb(nid);if(!n)return;
+  n[field]=value;saveG();draw();
 }
 
 // Links
@@ -2130,12 +2150,27 @@ function renderNodeTab(){
   // Epistêmico
   const epOpts=Object.entries(EPISTEMIC_TYPES).map(([k,v])=>`<option value="${k}"${(n.epistemic||'emic')===k?' selected':''}>${v.label}</option>`).join('');
 
+  const imgStyle=n.imgData?`background-image:url('${n.imgData}');background-size:cover;background-position:center`:`background:${color}`;
   el.innerHTML=`
     <div class="nif">
-      <div class="nif-b" style="background:${color}">${(n.label||'?').charAt(0).toUpperCase()}</div>
+      <div class="nif-b" style="${imgStyle};cursor:pointer;position:relative" title="Clique para trocar a imagem" onclick="document.getElementById('node-img-input').click()">
+        ${n.imgData?'':(n.label||'?').charAt(0).toUpperCase()}
+        ${n.imgData?`<span onclick="event.stopPropagation();removeNodeImg('${n.id}')" title="Remover imagem" style="position:absolute;top:-4px;right:-4px;width:15px;height:15px;border-radius:50%;background:var(--red);color:#fff;font-size:10px;line-height:15px;text-align:center;cursor:pointer">×</span>`:''}
+      </div>
       <div><div class="nif-t">${h(n.label)}</div><div class="nif-s">${nt.label||'Nó'} ${n.country||''}</div></div>
       <button class="btn btn-s" style="margin-left:auto;min-width:60px;padding:4px 8px;font-size:11px" onclick="openLexicon('${n.id}')">📖 Verbete</button>
     </div>
+    <input type="file" id="node-img-input" accept="image/*" style="display:none" onchange="processImg(event,'${n.id}')">
+    ${n.imgData?`
+    <div class="field"><label>Zoom da imagem</label>
+      <input type="range" min="1" max="3" step="0.05" value="${n.imgZoom||1}" oninput="setNodeImgProp('${n.id}','imgZoom',+this.value)">
+    </div>
+    <div class="field"><label>Posição horizontal</label>
+      <input type="range" min="-100" max="100" step="1" value="${n.imgX||0}" oninput="setNodeImgProp('${n.id}','imgX',+this.value)">
+    </div>
+    <div class="field"><label>Posição vertical</label>
+      <input type="range" min="-100" max="100" step="1" value="${n.imgY||0}" oninput="setNodeImgProp('${n.id}','imgY',+this.value)">
+    </div>`:''}
 
     <div class="field"><label>Nome</label>
       <input type="text" value="${h(n.label)}" oninput="lu('label',this.value)">
