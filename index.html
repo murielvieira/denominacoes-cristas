@@ -1861,6 +1861,11 @@ function setNodeImgProp(nid,field,value){
   const n=nb(nid);if(!n)return;
   n[field]=value;saveG();draw();
 }
+function resetNodeStyle(nid,field){
+  const n=nb(nid);if(!n)return;
+  delete n[field];
+  saveG();draw();if(panelOpen)renderNodeTab();
+}
 
 // Links
 function addNodeLink(nid){
@@ -2172,6 +2177,38 @@ function renderNodeTab(){
       <input type="range" min="-100" max="100" step="1" value="${n.imgY||0}" oninput="setNodeImgProp('${n.id}','imgY',+this.value)">
     </div>`:''}
 
+    <div class="div"></div>
+    <div class="stitle">Aparência</div>
+    <div class="field"><label>Tamanho (${n.r||20}px)</label>
+      <input type="range" min="8" max="60" step="1" value="${n.r||20}" oninput="lu('r',+this.value);this.previousElementSibling.textContent='Tamanho ('+this.value+'px)'">
+    </div>
+    <div class="field"><label>Forma</label>
+      <select onchange="lu('shape',this.value)">
+        <option value="" ${!n.shape?'selected':''}>Padrão do tipo (${nt.shape||'circle'})</option>
+        <option value="circle" ${n.shape==='circle'?'selected':''}>Círculo</option>
+        <option value="diamond" ${n.shape==='diamond'?'selected':''}>Losango</option>
+        <option value="square" ${n.shape==='square'?'selected':''}>Quadrado</option>
+        <option value="triangle" ${n.shape==='triangle'?'selected':''}>Triângulo</option>
+        <option value="pentagon" ${n.shape==='pentagon'?'selected':''}>Pentágono</option>
+        <option value="hexagon" ${n.shape==='hexagon'?'selected':''}>Hexágono</option>
+        <option value="star" ${n.shape==='star'?'selected':''}>Estrela</option>
+        <option value="cross" ${n.shape==='cross'?'selected':''}>Cruz</option>
+        <option value="pill" ${n.shape==='pill'?'selected':''}>Pílula</option>
+      </select>
+    </div>
+    <div class="field"><label>Cor de preenchimento</label><div class="color-row">
+      <input type="color" value="${n.customColor||color||'#556677'}" oninput="lu('customColor',this.value)">
+      <div class="color-sw">${n.customColor?'Personalizada':'Padrão da categoria'}</div>
+      ${n.customColor?`<button onclick="resetNodeStyle('${n.id}','customColor')" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px">×</button>`:''}
+    </div></div>
+    <div class="field"><label>Cor da borda</label><div class="color-row">
+      <input type="color" value="${n.customBorderColor||'#888888'}" oninput="lu('customBorderColor',this.value)">
+      <div class="color-sw">${n.customBorderColor?'Personalizada':'Padrão do tipo'}</div>
+      ${n.customBorderColor?`<button onclick="resetNodeStyle('${n.id}','customBorderColor')" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px">×</button>`:''}
+    </div></div>
+    <div class="field"><label><input type="checkbox" ${n.showBorder!==false?'checked':''} onchange="lu('showBorder',this.checked)" style="width:auto;margin-right:5px"> Mostrar borda</label></div>
+
+    <div class="div"></div>
     <div class="field"><label>Nome</label>
       <input type="text" value="${h(n.label)}" oninput="lu('label',this.value)">
     </div>
