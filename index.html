@@ -939,6 +939,10 @@ let scale=0.72, ox=0, oy=0;
 let panning=false, panSX=0, panSY=0, panOX=0, panOY=0;
 let dragId=null, dragDX=0, dragDY=0;
 let selId=null, ctxId=null, connFrom=null;
+let selIds=new Set();
+let dragGroup=null, dragOffsets=null;
+let boxSelecting=false, boxStartSX=0, boxStartSY=0, boxCurSX=0, boxCurSY=0;
+let clipboard=null;
 let mode='select';
 let curView='graph';
 let panelOpen=true;
@@ -1128,6 +1132,18 @@ function draw(){
 
   cx.restore();
   buildLegend();
+  if(boxSelecting){
+    cx.save();
+    cx.setLineDash([4,3]);
+    cx.lineWidth=1;
+    cx.strokeStyle='rgba(120,170,255,0.9)';
+    cx.fillStyle='rgba(120,170,255,0.12)';
+    const x1=Math.min(boxStartSX,boxCurSX),y1=Math.min(boxStartSY,boxCurSY);
+    const bw=Math.abs(boxCurSX-boxStartSX),bh=Math.abs(boxCurSY-boxStartSY);
+    cx.fillRect(x1,y1,bw,bh);
+    cx.strokeRect(x1,y1,bw,bh);
+    cx.restore();
+  }
 }
 
 function drawEdges(){
@@ -1144,7 +1160,7 @@ function drawEdges(){
     if(!va&&!vb)return;
 
     const et=ET[e.type||'origin']||{color:'#888',dash:false};
-    const hi=(selId===e.from||selId===e.to);
+    const hi=(selIds.has(e.from)||selIds.has(e.to));
     const dimmed=hasFilter||focusNodeId;
     const base=parseFloat(G.settings.edgeOpacity)||0.32;
     const eta=edgeTimeAlpha(e);
@@ -1236,7 +1252,7 @@ function drawRelEdges(){
       const a=n, b=nb(tid); if(!a||!b)return;
       const va=isVis(a), vb=isVis(b);
       if(!va&&!vb)return;
-      const hi=(selId===n.id||selId===tid);
+      const hi=(selIds.has(n.id)||selIds.has(tid));
       const base=parseFloat(G.settings.edgeOpacity)||0.32;
       const op=hi?0.9:(0.10);
       const rt=REL_TYPES.find(r=>r.val===rel.val)||REL_TYPES[2];
@@ -1269,7 +1285,7 @@ function tracePath(ctx,x,y,r,shape){
 
 function drawNode(n){
   const vis=isVis(n);
-  const sel=n.id===selId;
+  const sel=selIds.has(n.id);
   const color=nodeColor(n);
   const r=n.r||20;
   const hasFilter=srch||filtCats.size||filtStatus.size||filtNodeTypes.size||filtEpistemic.size||
@@ -1489,7 +1505,16 @@ function evDown(e){
     }
     return;
   }
-  if(hit){select(hit.id);dragId=hit.id;const[wx,wy]=s2w(sx,sy);dragDX=wx-hit.x;dragDY=wy-hit.y;}
+  if(hit){
+    if(e.shiftKey||e.ctrlKey||e.metaKey){ toggleSel(hit.id); return; }
+    if(!selIds.has(hit.id)){ select(hit.id); }
+    dragGroup=[...selIds];
+    const[wx,wy]=s2w(sx,sy);
+    dragOffsets={};
+    dragGroup.forEach(id=>{const nd=nb(id);if(nd)dragOffsets[id]={ox:wx-nd.x,oy:wy-nd.y};});
+    dragId=hit.id;
+  }
+  else if(e.shiftKey){ boxSelecting=true;boxStartSX=sx;boxStartSY=sy;boxCurSX=sx;boxCurSY=sy; }
   else{select(null);panning=true;panSX=sx;panSY=sy;panOX=ox;panOY=oy;cv.classList.add('grabbing');}
 }
 
@@ -1497,9 +1522,15 @@ let _hoverEdge=null;
 function evMove(e){
   const r=wrap.getBoundingClientRect(),sx=e.clientX-r.left,sy=e.clientY-r.top;
   if(dragId){
-    const n=nb(dragId);if(!n)return;
-    const[wx,wy]=s2w(sx,sy);n.x=wx-dragDX;n.y=wy-dragDY;
+    const[wx,wy]=s2w(sx,sy);
+    (dragGroup||[dragId]).forEach(id=>{
+      const nd=nb(id);if(!nd)return;
+      const off=dragOffsets&&dragOffsets[id];if(!off)return;
+      nd.x=wx-off.ox;nd.y=wy-off.oy;
+    });
     draw();updateNTB();
+  } else if(boxSelecting){
+    boxCurSX=sx;boxCurSY=sy;draw();
   } else if(panning){
     ox=panOX+(sx-panSX);oy=panOY+(sy-panSY);draw();
   } else {
@@ -1528,7 +1559,23 @@ function evMove(e){
     cv.style.cursor=hitNode?'pointer':(hitEdge?'default':'grab');
   }
 }
-function evUp(){if(dragId){pushH();saveG();dragId=null;}if(panning){panning=false;cv.classList.remove('grabbing');}}
+function evUp(){
+  if(dragId){pushH();saveG();dragId=null;dragGroup=null;dragOffsets=null;}
+  if(boxSelecting){
+    boxSelecting=false;
+    const x1=Math.min(boxStartSX,boxCurSX),x2=Math.max(boxStartSX,boxCurSX);
+    const y1=Math.min(boxStartSY,boxCurSY),y2=Math.max(boxStartSY,boxCurSY);
+    if(x2-x1>4||y2-y1>4){
+      G.nodes.forEach(n=>{
+        const[nsx,nsy]=w2s(n.x,n.y);
+        if(nsx>=x1&&nsx<=x2&&nsy>=y1&&nsy<=y2){selIds.add(n.id);selId=n.id;}
+      });
+      if(panelOpen)renderGT();
+    }
+    draw();
+  }
+  if(panning){panning=false;cv.classList.remove('grabbing');}
+}
 function evWheel(e){
   e.preventDefault();
   const r=wrap.getBoundingClientRect(),sx=e.clientX-r.left,sy=e.clientY-r.top;
@@ -1560,20 +1607,39 @@ function evKey(e){
   if(['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName))return;
   if(e.key==='s')setMode('select');
   if(e.key==='a')setMode('add');
-  if(e.key==='c')setMode('connect');
-  if(e.key==='Escape'){setMode('select');connFrom=null;document.getElementById('chint').style.display='none';closeModal();}
+  if(e.key==='c'&&!e.ctrlKey&&!e.metaKey)setMode('connect');
+  if(e.key==='Escape'){setMode('select');connFrom=null;document.getElementById('chint').style.display='none';closeModal();if(selIds.size)select(null);}
   if((e.ctrlKey||e.metaKey)&&e.key==='z'){e.preventDefault();undo();}
   if((e.ctrlKey||e.metaKey)&&(e.key==='y'||(e.shiftKey&&e.key==='z'))){e.preventDefault();redo();}
-  if(e.key==='Delete'||e.key==='Backspace')if(selId)confirmDelNode(selId);
+  if((e.ctrlKey||e.metaKey)&&e.key==='c'){e.preventDefault();copySel();}
+  if((e.ctrlKey||e.metaKey)&&e.key==='v'){e.preventDefault();pasteSel();}
+  if(e.key==='Delete'||e.key==='Backspace'){
+    if(selIds.size>1)confirmDelMulti();
+    else if(selId)confirmDelNode(selId);
+  }
   if(e.key==='f')fitView();
 }
 
 // ════════════════════════════════════════════════════════════════
 // SEÇÃO 8 — SELEÇÃO / MODOS / ZOOM
 // ════════════════════════════════════════════════════════════════
-function select(id){selId=id;draw();updateNTB();if(id&&panelOpen)renderGT();else if(!id)hideNTB();}
+function select(id){
+  selId=id;
+  selIds=id?new Set([id]):new Set();
+  draw();updateNTB();
+  if(id&&panelOpen)renderGT();else if(!id){hideNTB();if(panelOpen)renderGT();}
+}
+function toggleSel(id){
+  if(selIds.has(id)){
+    selIds.delete(id);
+    if(selId===id)selId=[...selIds].pop()||null;
+  } else {
+    selIds.add(id);selId=id;
+  }
+  draw();updateNTB();if(panelOpen)renderGT();
+}
 function updateNTB(){
-  const tb=document.getElementById('ntb'); if(!selId){tb.style.display='none';return;}
+  const tb=document.getElementById('ntb'); if(!selId||selIds.size>1){tb.style.display='none';return;}
   const n=nb(selId); if(!n){tb.style.display='none';return;}
   const[sx,sy]=w2s(n.x,n.y),rr=(n.r||20)*scale;
   const wr=wrap.getBoundingClientRect();
@@ -1702,6 +1768,70 @@ function delNode(id){
   saveG();draw();if(panelOpen)renderGT();toast('Nó excluído');
 }
 function delSel(){if(selId)confirmDelNode(selId);}
+
+function confirmDelMulti(){
+  const ids=[...selIds];
+  const affected=new Set();
+  G.edges.forEach(e=>{if(ids.includes(e.from)||ids.includes(e.to))affected.add(e.id);});
+  const names=ids.map(id=>nb(id)?.label||id);
+  const shown=names.slice(0,8).map(n=>'• '+n).join('\n');
+  const extra=names.length>8?`\n… e mais ${names.length-8}`:'';
+  const msg=`Excluir ${ids.length} nós selecionados?\n\n${shown}${extra}`+
+    (affected.size?`\n\nIsso também removerá ${affected.size} conexão(ões).`:'');
+  if(!confirm(msg))return;
+  delMulti(ids);
+}
+function delMulti(ids){
+  pushH();
+  const idSet=new Set(ids);
+  G.nodes=G.nodes.filter(n=>!idSet.has(n.id));
+  G.edges=G.edges.filter(e=>!idSet.has(e.from)&&!idSet.has(e.to));
+  G.nodes.forEach(n=>{if(n.relations)ids.forEach(id=>delete n.relations[id]);});
+  selIds=new Set();selId=null;
+  saveG();draw();hideNTB();if(panelOpen)renderGT();
+  toast(`${ids.length} nós excluídos`);
+}
+function copySel(){
+  if(selIds.size===0)return;
+  const ids=[...selIds];
+  const idSet=new Set(ids);
+  const nodes=ids.map(id=>nb(id)).filter(Boolean).map(n=>JSON.parse(JSON.stringify(n)));
+  const edges=G.edges.filter(e=>idSet.has(e.from)&&idSet.has(e.to)).map(e=>JSON.parse(JSON.stringify(e)));
+  if(!nodes.length)return;
+  clipboard={nodes,edges};
+  toast(`${nodes.length} nó(s) copiado(s)`+(edges.length?` + ${edges.length} conexão(ões)`:''));
+}
+function pasteSel(){
+  if(!clipboard||!clipboard.nodes.length)return;
+  pushH();
+  const idMap={};
+  const newNodes=clipboard.nodes.map(n=>{
+    const nid=gid();idMap[n.id]=nid;
+    return Object.assign(JSON.parse(JSON.stringify(n)),{id:nid,x:n.x+48,y:n.y+48});
+  });
+  const newEdges=clipboard.edges.map(e=>Object.assign(JSON.parse(JSON.stringify(e)),{id:eid(),from:idMap[e.from],to:idMap[e.to]}));
+  G.nodes.push(...newNodes);
+  G.edges.push(...newEdges);
+  selIds=new Set(newNodes.map(n=>n.id));
+  selId=newNodes.length?newNodes[newNodes.length-1].id:null;
+  saveG();draw();updateNTB();if(panelOpen)renderGT();
+  toast(`${newNodes.length} nó(s) colado(s)`);
+}
+function bulkSet(field,value){
+  if(selIds.size===0)return;
+  selIds.forEach(id=>{const n=nb(id);if(!n)return;recordNodeEdit(n,field,n[field]);n[field]=value;});
+  saveG();draw();
+}
+function bulkAddTag(tag){
+  tag=(tag||'').trim();if(!tag||selIds.size===0)return;
+  selIds.forEach(id=>{const n=nb(id);if(!n)return;if(!n.tags)n.tags=[];if(!n.tags.includes(tag))n.tags.push(tag);});
+  saveG();draw();if(panelOpen)renderGT();
+}
+function bulkAddCat(catId){
+  if(!catId||selIds.size===0)return;
+  selIds.forEach(id=>{const n=nb(id);if(!n)return;if(!n.categories)n.categories=[];if(!n.categories.includes(catId))n.categories.push(catId);});
+  saveG();draw();if(panelOpen)renderGT();
+}
 
 function addEdgeDirect(f,t,type,extra){
   if(!nb(f)||!nb(t)){toast('Nó de origem ou destino não encontrado');return null;}
@@ -2082,8 +2212,92 @@ function renderGT(){
 }
 
 // ── NODE TAB ────────────────────────────────────────────────────
+function renderMultiEditPanel(){
+  const el=document.getElementById('gt-node');
+  const ids=[...selIds];
+  const nodes=ids.map(id=>nb(id)).filter(Boolean);
+  const NT=getNodeTypes();
+  const ntOpts=Object.entries(NT).map(([k,v])=>`<option value="${k}">${h(v.label)}</option>`).join('');
+  const statusOpts=Object.entries(NODE_STATUS).map(([k,v])=>`<option value="${k}">${h(v.label)}</option>`).join('');
+  const epOpts=Object.entries(EPISTEMIC_TYPES).map(([k,v])=>`<option value="${k}">${h(v.label)}</option>`).join('');
+  const countryOpts=Object.entries(getAllCountries()).map(([f,nm])=>`<option value="${f}">${f} ${h(nm)}</option>`).join('');
+  const catOpts=getTaxList().map(([taxId,tax])=>{
+    const opts=getCatsByTax(taxId).sort((a,b)=>getCatPath(a[0]).localeCompare(getCatPath(b[0]))).map(([k])=>`<option value="${k}">${h(getCatPath(k))}</option>`).join('');
+    if(!opts)return '';
+    return `<optgroup label="${h(tax.label)}">${opts}</optgroup>`;
+  }).join('');
+  const namesPreview=nodes.slice(0,6).map(n=>h(n.label)).join(', ')+(nodes.length>6?`, +${nodes.length-6}`:'');
+
+  el.innerHTML=`
+    <div class="stitle">${ids.length} nós selecionados</div>
+    <div style="font-size:11px;color:var(--tx3);margin-bottom:10px;line-height:1.5">${namesPreview}</div>
+    <div style="display:flex;gap:6px;margin-bottom:14px">
+      <button class="btn btn-s" style="flex:1" onclick="copySel()" title="Ctrl+C">⧉ Copiar</button>
+      <button class="btn btn-s" style="flex:1" onclick="confirmDelMulti()" title="Delete">🗑 Excluir</button>
+      <button class="btn btn-s" style="flex:1" onclick="select(null)" title="Esc">✕ Limpar</button>
+    </div>
+    <div class="div"></div>
+    <div class="stitle">Aplicar a todos os selecionados</div>
+
+    <div class="field"><label>Tipo de nó</label>
+      <select onchange="if(this.value){bulkSet('nodeType',this.value);}">
+        <option value="">— não alterar —</option>${ntOpts}
+      </select>
+    </div>
+    <div class="field"><label>Status</label>
+      <select onchange="if(this.value){bulkSet('status',this.value);}">
+        <option value="">— não alterar —</option>${statusOpts}
+      </select>
+    </div>
+    <div class="field"><label>Definição epistêmica</label>
+      <select onchange="if(this.value){bulkSet('epistemic',this.value);}">
+        <option value="">— não alterar —</option>${epOpts}
+      </select>
+    </div>
+    <div class="field"><label>País</label>
+      <select onchange="if(this.value){bulkSet('country',this.value);}">
+        <option value="">— não alterar —</option>${countryOpts}
+      </select>
+    </div>
+    <div class="field"><label>Tamanho</label>
+      <input type="range" min="8" max="60" step="1" value="20" oninput="bulkSet('r',+this.value);this.previousElementSibling.textContent='Tamanho ('+this.value+'px)'">
+    </div>
+    <div class="field"><label>Forma</label>
+      <select onchange="if(this.value){bulkSet('shape',this.value);}">
+        <option value="">— não alterar —</option>
+        <option value="circle">Círculo</option>
+        <option value="diamond">Losango</option>
+        <option value="square">Quadrado</option>
+        <option value="triangle">Triângulo</option>
+        <option value="pentagon">Pentágono</option>
+        <option value="hexagon">Hexágono</option>
+        <option value="star">Estrela</option>
+        <option value="cross">Cruz</option>
+        <option value="pill">Pílula</option>
+      </select>
+    </div>
+    <div class="field"><label>Cor de preenchimento</label>
+      <input type="color" value="#556677" oninput="bulkSet('customColor',this.value)">
+    </div>
+    <div class="field"><label>Cor da borda</label>
+      <input type="color" value="#888888" oninput="bulkSet('customBorderColor',this.value)">
+    </div>
+
+    <div class="div"></div>
+    <div class="stitle">Adicionar a todos (mantém o que já existe)</div>
+    <div class="field"><label>Categoria</label>
+      <select onchange="if(this.value){bulkAddCat(this.value);this.value='';}">
+        <option value="">Adicionar categoria…</option>${catOpts}
+      </select>
+    </div>
+    <div class="field"><label>Tag</label>
+      <input type="text" placeholder="+ adicionar e Enter" onkeydown="if(event.key==='Enter'){bulkAddTag(this.value);this.value='';}">
+    </div>
+  `;
+}
 function renderNodeTab(){
   const el=document.getElementById('gt-node');
+  if(selIds.size>1){renderMultiEditPanel();return;}
   if(!selId){
     el.innerHTML=`<div class="empty"><div class="ei">✦</div><p>Selecione um nó para editar<br><small>Clique duplo para abrir painel</small></p></div>
     <div class="div"></div><div class="stitle">Novo nó</div>
