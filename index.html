@@ -980,7 +980,15 @@ function rebuildGrid(){
   });
 }
 
-function nb(id){ return G.nodes.find(n=>n.id===id); }
+let _nbIndex=null,_nbIndexFor=null,_nbIndexLen=-1;
+function nb(id){
+  if(_nbIndexFor!==G.nodes||_nbIndexLen!==G.nodes.length){
+    _nbIndex=new Map();
+    for(const n of G.nodes)_nbIndex.set(n.id,n);
+    _nbIndexFor=G.nodes;_nbIndexLen=G.nodes.length;
+  }
+  return _nbIndex.get(id);
+}
 function w2s(wx,wy){ return [wx*scale+ox, wy*scale+oy]; }
 function s2w(sx,sy){ return [(sx-ox)/scale, (sy-oy)/scale]; }
 
@@ -1052,7 +1060,7 @@ function nodeTimeAlpha(n){
 
 function parseYear(s){
   if(!s)return null;
-  const m=(s+'').match(/(\d{3,4})/);
+  const m=(s+'').match(/(\d{1,4})/);
   return m?parseInt(m[1]):null;
 }
 
@@ -1158,6 +1166,7 @@ function drawEdges(){
     const a=nb(e.from), b=nb(e.to); if(!a||!b)return;
     const va=isVis(a), vb=isVis(b);
     if(!va&&!vb)return;
+    if(!inViewport(a)&&!inViewport(b))return;
 
     const et=ET[e.type||'origin']||{color:'#888',dash:false};
     const hi=(selIds.has(e.from)||selIds.has(e.to));
@@ -1457,7 +1466,7 @@ function buildLegend(){
   const ET=getEdgeTypes(), active=getActiveEdgeTypes();
   if(active.size){
     html+=Object.entries(ET).filter(([k])=>active.has(k)).map(([k,v])=>
-      `<div class="li"><div class="ll${v.dash?' dashed':''}" style="background:${v.dash?'transparent':v.color};color:${v.color};${v.dash?`background:repeating-linear-gradient(90deg,${v.color} 0,${v.color} 4px,transparent 4px,transparent 7px)`:''};"></div>${v.label}</div>`
+      `<div class="li"><div class="ll${v.dash?' dashed':''}" style="background:${v.dash?'transparent':v.color};color:${v.color};${v.dash?`background:repeating-linear-gradient(90deg,${v.color} 0,${v.color} 4px,transparent 4px,transparent 7px)`:''};"></div>${h(v.label)}</div>`
     ).join('');
     html+='<div style="width:100%;height:1px;background:var(--br);margin:3px 0"></div>';
   }
@@ -1543,10 +1552,10 @@ function evMove(e){
       const a=nb(hitEdge.from),b=nb(hitEdge.to);
       const srcTxt=hitEdge.source?.text?`<div style="color:var(--tx3);font-style:italic;margin-top:3px">📜 ${h(hitEdge.source.text.slice(0,80)+(hitEdge.source.text.length>80?'…':''))}</div>`:'';
       const ctst=hitEdge.contested?`<div style="color:var(--red)">⚡ Contestado: ${h((hitEdge.contestNote||'').slice(0,60))}</div>`:'';
-      tip.innerHTML=`<div style="color:${et.color};font-weight:500">${et.label}</div>`+
-        `<div>${a?a.label:'?'} → ${b?b.label:'?'}</div>`+
-        (hitEdge.start||hitEdge.end?`<div style="color:var(--tx3)">${hitEdge.start||'?'} – ${hitEdge.end||'presente'}</div>`:'') +
-        (hitEdge.perspective?`<div style="color:var(--tx3);font-style:italic">Perspectiva: ${hitEdge.perspective}</div>`:'') +
+      tip.innerHTML=`<div style="color:${et.color};font-weight:500">${h(et.label)}</div>`+
+        `<div>${a?h(a.label):'?'} → ${b?h(b.label):'?'}</div>`+
+        (hitEdge.start||hitEdge.end?`<div style="color:var(--tx3)">${h(hitEdge.start||'?')} – ${h(hitEdge.end||'presente')}</div>`:'') +
+        (hitEdge.perspective?`<div style="color:var(--tx3);font-style:italic">Perspectiva: ${h(hitEdge.perspective)}</div>`:'') +
         (hitEdge.label?`<div style="color:var(--ac)">"${h(hitEdge.label)}"</div>`:'') +
         ctst + srcTxt;
       tip.style.display='block';
@@ -1871,6 +1880,7 @@ function importJSON(e){
       // Validação referencial
       const ids=new Set(data.nodes.map(n=>n.id));
       const bad=data.edges.filter(e=>!ids.has(e.from)||!ids.has(e.to));
+      data.edges=data.edges.filter(e=>ids.has(e.from)&&ids.has(e.to));
       let msg='';
       if(bad.length)msg=`⚠ ${bad.length} aresta(s) com referência inválida foram removidas automaticamente.\n`;
       pushH();G=data;migrate(G);
@@ -1968,6 +1978,9 @@ function removeNodeCat(nid,catId){
 function processImg(e,nid){
   const file=e.target.files[0];if(!file)return;
   if(!file.type.startsWith('image/')){toast('Selecione um arquivo de imagem');e.target.value='';return;}
+  if(file.size>1.5*1024*1024){
+    if(!confirm(`Essa imagem tem ${(file.size/1024/1024).toFixed(1)}MB. Imagens grandes ocupam espaço no armazenamento local do navegador (limitado a poucos MB no total) e podem impedir que outras edições sejam salvas. Usar mesmo assim?`)){e.target.value='';return;}
+  }
   const reader=new FileReader();
   reader.onload=(ev)=>{
     const n=nb(nid);if(!n)return;
@@ -2079,7 +2092,7 @@ function closeModal(){document.getElementById('modal-root').innerHTML='';}
 function openConnectModal(fromId,toId){
   const a=nb(fromId),b=nb(toId);if(!a||!b)return;
   const ET=getEdgeTypes();
-  const typeOpts=Object.entries(ET).map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('');
+  const typeOpts=Object.entries(ET).map(([k,v])=>`<option value="${k}">${h(v.label)}</option>`).join('');
   const epOpts=Object.entries(EPISTEMIC_TYPES).map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('');
   openModal(`Criar conexão: ${h(a.label)} → ${h(b.label)}`,`
     <div class="field"><label>Tipo de relação</label><select id="mc-type">${typeOpts}</select></div>
@@ -2132,7 +2145,7 @@ function openEdgeModal(eid2){
   const e=G.edges.find(x=>x.id===eid2);if(!e)return;
   const a=nb(e.from),b=nb(e.to);
   const ET=getEdgeTypes();
-  const typeOpts=Object.entries(ET).map(([k,v])=>`<option value="${k}"${e.type===k?' selected':''}>${v.label}</option>`).join('');
+  const typeOpts=Object.entries(ET).map(([k,v])=>`<option value="${k}"${e.type===k?' selected':''}>${h(v.label)}</option>`).join('');
   const statusOpts=['ativa','tentativa','rejeitada','histórica','absorvida'].map(s=>`<option value="${s}"${e.status===s?' selected':''}>${s}</option>`).join('');
   const epOpts=Object.entries(EPISTEMIC_TYPES).map(([k,v])=>`<option value="${k}"${e.epistemic===k?' selected':''}>${v.label}</option>`).join('');
   const histHtml=(e.editHistory||[]).map(h2=>`<div class="hist-entry"><span class="htime">${new Date(h2.ts).toLocaleString('pt-BR')}</span> — ${h(h2.field)}: <span class="hval">${h(String(h2.oldVal||'').slice(0,60))}</span></div>`).join('')||'<div style="color:var(--tx3);font-size:11px">Sem histórico</div>';
@@ -2354,14 +2367,14 @@ function renderNodeTab(){
       <div class="cdot" style="background:${et.color}"></div>
       <span style="flex:1;min-width:80px;font-size:12px">${o?h(o.label):oid}</span>
       <span style="font-size:10px;color:var(--tx3)">${dir}</span>
-      <span style="font-size:10px;color:${et.color}">${et.label}</span>
+      <span style="font-size:10px;color:${et.color}">${h(et.label)}</span>
       ${srcBadge}${cBadge}${timeBadge}
       <span class="cx" onclick="event.stopPropagation();removeEdge('${e.id}')">×</span>
     </div>`;
   }).join('');
 
   // Tipo de nó select
-  const ntOpts=Object.entries(getNodeTypes()).map(([k,v])=>`<option value="${k}"${(n.nodeType||'denominacao')===k?' selected':''}>${v.label}</option>`).join('');
+  const ntOpts=Object.entries(getNodeTypes()).map(([k,v])=>`<option value="${k}"${(n.nodeType||'denominacao')===k?' selected':''}>${h(v.label)}</option>`).join('');
 
   // Status
   const statusOpts=Object.entries(NODE_STATUS).map(([k,v])=>`<option value="${k}"${(n.status||'active')===k?' selected':''}>${v.label}</option>`).join('');
@@ -2376,7 +2389,7 @@ function renderNodeTab(){
         ${n.imgData?'':(n.label||'?').charAt(0).toUpperCase()}
         ${n.imgData?`<span onclick="event.stopPropagation();removeNodeImg('${n.id}')" title="Remover imagem" style="position:absolute;top:-4px;right:-4px;width:15px;height:15px;border-radius:50%;background:var(--red);color:#fff;font-size:10px;line-height:15px;text-align:center;cursor:pointer">×</span>`:''}
       </div>
-      <div><div class="nif-t">${h(n.label)}</div><div class="nif-s">${nt.label||'Nó'} ${n.country||''}</div></div>
+      <div><div class="nif-t">${h(n.label)}</div><div class="nif-s">${h(nt.label||'Nó')} ${n.country||''}</div></div>
       <button class="btn btn-s" style="margin-left:auto;min-width:60px;padding:4px 8px;font-size:11px" onclick="openLexicon('${n.id}')">📖 Verbete</button>
     </div>
     <input type="file" id="node-img-input" accept="image/*" style="display:none" onchange="processImg(event,'${n.id}')">
@@ -2593,9 +2606,9 @@ function renderSourceTab(){
     ${edgesWithSrc.length?edgesWithSrc.map(e=>{
       const oid=e.from===n.id?e.to:e.from; const o=nb(oid);
       const ET=getEdgeTypes(),et=ET[e.type]||{label:e.type,color:'#888'};
-      const url=e.source?.url?`<a href="${h(e.source.url)}" target="_blank" style="color:var(--ac);font-size:10px;word-break:break-all">${h(e.source.url)}</a>`:'';
+      const url=e.source?.url?`<a href="${safeUrl(e.source.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--ac);font-size:10px;word-break:break-all">${h(e.source.url)}</a>`:'';
       return `<div class="src-block" style="margin-bottom:8px">
-        <div style="font-size:11px;color:${et.color};margin-bottom:4px">${et.label}: ${o?h(o.label):'?'} (${e.start||'?'}–${e.end||'∞'})</div>
+        <div style="font-size:11px;color:${et.color};margin-bottom:4px">${h(et.label)}: ${o?h(o.label):'?'} (${e.start||'?'}–${e.end||'∞'})</div>
         <div style="font-size:12px;color:var(--tx)">${h(e.source.text)}</div>
         ${url}
         ${e.contested?`<div style="font-size:11px;color:var(--red);margin-top:5px">⚡ Contestado: ${h(e.contestNote||'')}</div>`:''}
@@ -2608,7 +2621,7 @@ function renderSourceTab(){
       const oid=e.from===n.id?e.to:e.from; const o=nb(oid);
       const ET=getEdgeTypes(),et=ET[e.type]||{label:e.type,color:'#888'};
       return `<div style="background:rgba(192,80,80,.08);border:1px solid rgba(192,80,80,.25);border-radius:var(--rs);padding:8px;margin-bottom:6px">
-        <div style="font-size:11px;color:var(--red);font-weight:500">⚡ ${et.label}: ${o?h(o.label):'?'}</div>
+        <div style="font-size:11px;color:var(--red);font-weight:500">⚡ ${h(et.label)}: ${o?h(o.label):'?'}</div>
         <div style="font-size:11px;color:var(--tx2);margin-top:4px">${h(e.contestNote||'Sem nota de contestação.')}</div>
       </div>`;
     }).join('')}`:''}
@@ -2655,7 +2668,7 @@ function renderStyleTab(){
     <div class="div"></div>
     <div class="stitle">Tipos de aresta</div>
     ${Object.entries(getEdgeTypes()).map(([k,v])=>`
-      <div class="field"><label>${v.label} <small style="color:var(--tx3)">[${k}]</small></label>
+      <div class="field"><label>${h(v.label)} <small style="color:var(--tx3)">[${h(k)}]</small></label>
       <div class="color-row">
         <input type="color" value="${v.color||'#888888'}" oninput="updateEdgeTypeColor('${k}',this.value)">
         <div class="color-sw" style="background:${v.color||'#888'}">${v.dash?'tracejado':'sólido'}</div>
@@ -3078,7 +3091,7 @@ function buildFiltNodeTypes(){
   const el=document.getElementById('filt-nodetypes');if(!el)return;
   const NT=getNodeTypes();
   el.innerHTML=Object.entries(NT).map(([k,v])=>`
-    <button id="fnt-${k}" class="fc${filtNodeTypes.has(k)?' on':''}" onclick="toggleFiltNodeType('${k}')">${v.icon||''} ${v.label}</button>`).join('');
+    <button id="fnt-${k}" class="fc${filtNodeTypes.has(k)?' on':''}" onclick="toggleFiltNodeType('${k}')">${h(v.icon||'')} ${h(v.label)}</button>`).join('');
 }
 function toggleFiltNodeType(k){
   filtNodeTypes.has(k)?filtNodeTypes.delete(k):filtNodeTypes.add(k);
@@ -3402,13 +3415,13 @@ function renderLexicon(n){
     const oid=e.from===n.id?e.to:e.from;const o=nb(oid);
     const et=ET[e.type]||{label:e.type,color:'#888'};
     const dir=e.from===n.id?'→':'←';
-    const srcHtml=e.source?.text?`<div class="lex-cite">📜 ${h(e.source.text)}${e.source.url?` — <a href="${h(e.source.url)}" target="_blank" style="color:var(--ac)">link</a>`:''}</div>`:'';
+    const srcHtml=e.source?.text?`<div class="lex-cite">📜 ${h(e.source.text)}${e.source.url?` — <a href="${safeUrl(e.source.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--ac)">link</a>`:''}</div>`:'';
     const cHtml=e.contested?`<div style="font-size:10px;color:var(--red);margin-top:3px">⚡ ${h(e.contestNote||'Contestado')}</div>`:'';
     const epHtml=e.epistemic?`<span class="ep-badge ep-${e.epistemic}">${epType?.label||e.epistemic}</span>`:'';
     return `<div class="lex-rel-item">
       <div style="display:flex;align-items:center;gap:6px">
         <div style="width:8px;height:8px;border-radius:50%;background:${et.color};flex-shrink:0"></div>
-        <strong style="font-size:13px;color:${et.color}">${et.label}</strong>
+        <strong style="font-size:13px;color:${et.color}">${h(et.label)}</strong>
         <span style="font-size:11px;color:var(--tx2)">${dir} ${o?h(o.label):oid}</span>
         ${epHtml}
         ${e.contested?'<span class="ep-badge ep-contested">⚡ Contestado</span>':''}
@@ -3448,17 +3461,17 @@ function renderLexicon(n){
   // Links
   const linksHtml=(n.links||[]).filter(l=>l.url).map(l=>{
     const kind=LINK_KINDS[l.kind||'web']||{icon:'🔗',label:'Link'};
-    return `<a href="${h(l.url)}" target="_blank" style="display:flex;align-items:center;gap:5px;color:var(--ac);font-size:12px;margin-bottom:3px">${kind.icon} ${h(l.label||l.url)}</a>`;
+    return `<a href="${safeUrl(l.url)}" target="_blank" rel="noopener noreferrer" style="display:flex;align-items:center;gap:5px;color:var(--ac);font-size:12px;margin-bottom:3px">${kind.icon} ${h(l.label||l.url)}</a>`;
   }).join('');
 
   el.innerHTML=`<div class="lex-wrap">
     <div class="lex-header">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
-        <div style="width:48px;height:48px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:500;flex-shrink:0">${n.label.charAt(0).toUpperCase()}</div>
+        <div style="width:48px;height:48px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:500;flex-shrink:0">${h(n.label.charAt(0).toUpperCase())}</div>
         <div>
-          <span class="ep-badge ep-${n.epistemic||'emic'}" style="margin-bottom:4px;display:inline-flex">${epType?.label||''}</span>
-          <span style="margin-left:6px;font-size:11px;color:var(--tx3)">${nt.label||'Nó'}</span>
-          ${n.status&&n.status!=='active'?`<span style="margin-left:6px;font-size:11px;color:var(--amb)">${NODE_STATUS[n.status]?.label||n.status}</span>`:''}
+          <span class="ep-badge ep-${n.epistemic||'emic'}" style="margin-bottom:4px;display:inline-flex">${h(epType?.label||'')}</span>
+          <span style="margin-left:6px;font-size:11px;color:var(--tx3)">${h(nt.label||'Nó')}</span>
+          ${n.status&&n.status!=='active'?`<span style="margin-left:6px;font-size:11px;color:var(--amb)">${h(NODE_STATUS[n.status]?.label||n.status)}</span>`:''}
         </div>
       </div>
       <div class="lex-title">${n.country?`<span style="font-size:22px">${n.country}</span> `:''}${h(n.label)}</div>
@@ -3578,6 +3591,12 @@ function resetAll(){
 }
 
 function h(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function safeUrl(u){
+  u=(u||'').trim();
+  if(/^(https?:|mailto:)/i.test(u))return h(u);
+  if(/^[a-z0-9.\-]+\.[a-z]{2,}([/?#].*)?$/i.test(u))return h('https://'+u); // domínio sem esquema
+  return '#';
+}
 function updateBadge(){document.getElementById('nbadge').textContent=G.nodes.length+' nós';}
 function toast(msg){const el=document.getElementById('toast');el.textContent=msg;el.classList.add('show');clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),2400);}
 
