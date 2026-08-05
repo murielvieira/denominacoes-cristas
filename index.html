@@ -851,7 +851,50 @@ let WS = (() => {
 function activeTab(){ return WS.tabs.find(t=>t.id===WS.activeTabId)||WS.tabs[0]; }
 let G = activeTab().data;
 
-function saveWS(){ try{localStorage.setItem('denom-ws',JSON.stringify(WS));}catch(e){toast('⚠ Armazenamento cheio — exporte o JSON!');} }
+// ── Armazenamento local: IndexedDB (com fallback pra localStorage) ─
+const IDB_NAME='denom-app-db', IDB_STORE='workspace', IDB_KEY='denom-ws';
+let _storageBackend='localStorage';
+let _dbPromise=null;
+function dbOpen(){
+  if(_dbPromise)return _dbPromise;
+  _dbPromise=new Promise((resolve,reject)=>{
+    if(!window.indexedDB){reject(new Error('IndexedDB indisponível neste navegador'));return;}
+    const req=indexedDB.open(IDB_NAME,1);
+    req.onupgradeneeded=()=>{ if(!req.result.objectStoreNames.contains(IDB_STORE)) req.result.createObjectStore(IDB_STORE); };
+    req.onsuccess=()=>resolve(req.result);
+    req.onerror=()=>reject(req.error);
+    req.onblocked=()=>reject(new Error('Abertura do IndexedDB bloqueada'));
+  });
+  return _dbPromise;
+}
+function idbGet(){
+  return dbOpen().then(db=>new Promise((resolve,reject)=>{
+    const tx=db.transaction(IDB_STORE,'readonly');
+    const req=tx.objectStore(IDB_STORE).get(IDB_KEY);
+    req.onsuccess=()=>resolve(req.result);
+    req.onerror=()=>reject(req.error);
+  }));
+}
+function idbSet(value){
+  return dbOpen().then(db=>new Promise((resolve,reject)=>{
+    const tx=db.transaction(IDB_STORE,'readwrite');
+    tx.objectStore(IDB_STORE).put(value,IDB_KEY);
+    tx.oncomplete=()=>resolve();
+    tx.onerror=()=>reject(tx.error);
+  }));
+}
+
+function saveWS(){
+  if(_storageBackend==='indexeddb'){
+    idbSet(WS).catch(err=>{
+      console.error('Falha ao salvar no IndexedDB:',err);
+      toast('⚠ Armazenamento cheio — exporte o JSON!');
+    });
+  } else {
+    try{localStorage.setItem('denom-ws',JSON.stringify(WS));}
+    catch(e){toast('⚠ Armazenamento cheio — exporte o JSON!');}
+  }
+}
 function saveG(){ activeTab().data=G; saveWS(); updateBadge(); }
 
 // ── Histórico de undo/redo ────────────────────────────────────
@@ -1463,6 +1506,15 @@ function edgeAt(sx,sy){
 function buildLegend(){
   const el=document.getElementById('legend'); if(!el)return;
   let html='';
+  const mode=G.settings.legendMode||'categories';
+  const modeOpts=[
+    ['categories','Categorias'],['edgeTypes','Tipos de aresta'],['nodeTypes','Tipos de nó'],
+    ['status','Status'],['epistemic','Definição epistêmica'],['relations','Relações'],
+  ];
+  html+=`<select onchange="setLegendMode(this.value)" title="O que esta legenda mostra" style="font-size:10px;background:var(--bg3);color:var(--tx2);border:1px solid var(--br);border-radius:4px;padding:2px 4px;width:100%;margin-bottom:2px">
+    ${modeOpts.map(([k,l])=>`<option value="${k}"${mode===k?' selected':''}>${h(l)}</option>`).join('')}
+  </select>`;
+
   const ET=getEdgeTypes(), active=getActiveEdgeTypes();
   if(active.size){
     html+=Object.entries(ET).filter(([k])=>active.has(k)).map(([k,v])=>
@@ -1471,15 +1523,45 @@ function buildLegend(){
     html+='<div style="width:100%;height:1px;background:var(--br);margin:3px 0"></div>';
   }
   if(vizRel){
-    html+=REL_TYPES.map(r=>`<div class="li"><div class="ll dashed" style="color:${r.color};background:repeating-linear-gradient(90deg,${r.color} 0,${r.color} 5px,transparent 5px,transparent 9px)"></div>${r.label}</div>`).join('');
+    html+=REL_TYPES.map(r=>`<div class="li"><div class="ll dashed" style="color:${r.color};background:repeating-linear-gradient(90deg,${r.color} 0,${r.color} 5px,transparent 5px,transparent 9px)"></div>${h(r.label)}</div>`).join('');
     html+='<div style="width:100%;height:1px;background:var(--br);margin:3px 0"></div>';
   }
-  const taxLabel=G.taxonomies[colorByTax]?.label||'';
-  if(taxLabel)html+=`<div style="font-size:10px;color:var(--tx3);width:100%;padding:2px 0">${h(taxLabel)}</div>`;
-  html+=getCatsByTax(colorByTax).filter(([,v])=>!v.parent).map(([k,v])=>
-    `<div class="li"><div class="ld" style="background:${cc(k)}"></div>${h(v.label)}</div>`
-  ).join('');
+
+  if(mode==='edgeTypes'){
+    const used=new Set(G.edges.map(e=>e.type||'origin'));
+    html+=Object.entries(ET).filter(([k])=>used.has(k)).map(([k,v])=>
+      `<div class="li"><div class="ll${v.dash?' dashed':''}" style="background:${v.dash?'transparent':v.color};${v.dash?`background:repeating-linear-gradient(90deg,${v.color} 0,${v.color} 4px,transparent 4px,transparent 7px)`:''}"></div>${h(v.label)}</div>`
+    ).join('')||`<div style="font-size:10px;color:var(--tx3)">Nenhuma aresta no grafo</div>`;
+  } else if(mode==='nodeTypes'){
+    const used=new Set(G.nodes.map(n=>n.nodeType||'denominacao'));
+    html+=Object.entries(getNodeTypes()).filter(([k])=>used.has(k)).map(([k,v])=>
+      `<div class="li"><div class="ld" style="background:${v.color||'#888'}"></div>${v.icon?h(v.icon)+' ':''}${h(v.label)}</div>`
+    ).join('');
+  } else if(mode==='status'){
+    const used=new Set(G.nodes.map(n=>n.status||'active'));
+    html+=Object.entries(NODE_STATUS).filter(([k])=>used.has(k)).map(([k,v])=>
+      `<div class="li"><div class="ld" style="background:${v.color||'#888'}"></div>${h(v.label)}</div>`
+    ).join('');
+  } else if(mode==='epistemic'){
+    const used=new Set(G.nodes.map(n=>n.epistemic||'emic'));
+    html+=Object.entries(EPISTEMIC_TYPES).filter(([k])=>used.has(k)).map(([k,v])=>
+      `<span class="ep-badge ${v.class}" style="margin:1px 0">${h(v.label)}</span>`
+    ).join('');
+  } else if(mode==='relations'){
+    html+=REL_TYPES.map(r=>`<div class="li"><div class="ll dashed" style="background:repeating-linear-gradient(90deg,${r.color} 0,${r.color} 5px,transparent 5px,transparent 9px)"></div>${h(r.label)}</div>`).join('');
+  } else {
+    const taxLabel=G.taxonomies[colorByTax]?.label||'';
+    if(taxLabel)html+=`<div style="font-size:10px;color:var(--tx3);width:100%;padding:2px 0">${h(taxLabel)}</div>`;
+    html+=getCatsByTax(colorByTax).filter(([,v])=>!v.parent).map(([k,v])=>
+      `<div class="li"><div class="ld" style="background:${cc(k)}"></div>${h(v.label)}</div>`
+    ).join('');
+  }
   el.innerHTML=html;
+}
+function setLegendMode(mode){
+  G.settings.legendMode=mode;
+  saveG();
+  buildLegend();
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -3685,6 +3767,34 @@ populateCountryFilter();
 buildFiltNodeTypes();
 
 // Carrega grafo remoto se for visitante
+function applyLoadedWS(newWS){
+  WS=newWS;
+  activeTab();
+  G=activeTab().data;
+  migrate(G);
+  EDGE_TYPES=getEdgeTypes();
+  renderTabsBar();resizeCV();fitView();buildLegend();updateBadge();updateZP();
+  populateColorByTax();populateFocusSelect();populateCountryFilter();
+  buildViewChips();buildCatChips();buildFiltNodeTypes();
+  draw();if(panelOpen)renderGT();
+}
+
+(async function initIndexedDBBackend(){
+  try{
+    const idbData=await idbGet();
+    if(idbData&&Array.isArray(idbData.tabs)&&idbData.tabs.length){
+      _storageBackend='indexeddb';
+      if(JSON.stringify(idbData)!==JSON.stringify(WS)) applyLoadedWS(idbData);
+    } else {
+      await idbSet(WS);
+      _storageBackend='indexeddb';
+    }
+  }catch(err){
+    console.warn('IndexedDB indisponível — mantendo localStorage como armazenamento local.',err);
+    _storageBackend='localStorage';
+  }
+})();
+
 if(_isUsingRemote){
   fetchRemoteData().then(remoteData=>{
     if(!remoteData||!Array.isArray(remoteData.nodes)){
